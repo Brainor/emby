@@ -1,18 +1,16 @@
-import configparser
 import datetime
 import multiprocessing as mp
 import re
 import time
 import urllib.parse as parse
+from configparser import ConfigParser
 from pathlib import Path
 
 import fire
 import requests
 
-from alive_progress import alive_bar
-
 s = requests.Session()
-config = configparser.ConfigParser()
+config = ConfigParser()
 """
 [account]
 emby.com = 123124591827312
@@ -20,25 +18,38 @@ emby.com = 123124591827312
 [settings]
 folder = D:\Movies\
 """
-config.read("config.ini")
-folder_loc: str = config["settings"]["folder"]
 
 
 def main(url: str):
+    if config.has_option("settings", "folder"):
+        folder_loc = config["settings"]["folder"]
+    else:
+        print("no folder location in settings")
+        exit()
+
     o = parse.urlsplit(url)
-    file_loc = Path(folder_loc) / get_filename(o)
+    file_loc = Path(folder_loc) / get_filename(o, folder_loc)
     start_loc = file_loc.stat().st_size if file_loc.exists() else 0
     start = time.time()
     print(f"下载: {file_loc.name}")
     while "speed_dict" not in locals() or speed_dict["stop"]:
-        speed_dict = mp.Manager().dict({"size": [0] * 10, "time": [time.time()] * 10, "index": 0, "total_length": -1, "current_length": -2, "stop": False, "max_speed": 0})
+        speed_dict = mp.Manager().dict(
+            {
+                "size": [0] * 10,
+                "time": [time.time()] * 10,
+                "total_length": -1,
+                "current_length": -2,
+                "stop": False,  # 由进度条控制是否重置连接. TODO 0正常, 1速度太慢未考虑proxy, 2速度太慢已考虑proxy
+                "max_speed": 0,  # 0表示无法正常连接
+            }
+        )
         p_progress_bar = mp.Process(target=progress_bar, args=(speed_dict,), daemon=True)
         p_progress_bar.start()
 
         p_download_file = mp.Process(target=emby_download, args=(url, file_loc, speed_dict), daemon=True)
         p_download_file.start()
         while True:
-            if speed_dict["stop"]:
+            if speed_dict["stop"]:  # 速度太慢
                 p_download_file.terminate()
                 p_download_file.join()
                 if p_progress_bar.is_alive():
@@ -48,11 +59,11 @@ def main(url: str):
                 time.sleep(5)
                 break
             elif not p_download_file.is_alive():
-                if speed_dict["current_length"] == speed_dict["total_length"] and speed_dict["total_length"] > 0:
+                if speed_dict["current_length"] == speed_dict["total_length"] and speed_dict["total_length"] > 0:  # 下载完成
                     p_progress_bar.terminate()
                     p_progress_bar.join()
                     break
-                else:
+                else:  # 下载报错, p_download_file停止
                     if p_progress_bar.is_alive():
                         p_progress_bar.terminate()
                         p_progress_bar.join()
@@ -84,37 +95,28 @@ def emby_download(url, file_loc, speed_dict):
         start_loc = file_loc.stat().st_size
     else:
         start_loc = 0
-    header = {
-        "Accept": "*/*",
-        "Accept-Encoding": "identity;q=1, *;q=0",
-        "Accept-Language": "zh-CN,zh;q=0.9",
-        "Host": o.netloc,
-        "Connection": "keep-alive",
-        "Referer": f"{o.scheme}://{o.netloc}/web/index.html",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.87 Safari/537.36 SE 2.X MetaSr 1.0",
-        "Range": f"bytes={start_loc}-",
-    } | {
-        "Sec-Fetch-Dest": "video",
-        "Sec-Fetch-Mode": "no-cors",
-        "Set-Fetch-Site": "same-origin",
-    }
+    header = {"Accept": "*/*", "Accept-Encoding": "identity;q=1, *;q=0", "Accept-Language": "zh-CN,zh;q=0.9", "Host": o.netloc, "Connection": "keep-alive", "Referer": f"{o.scheme}://{o.netloc}/web/index.html", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.87 Safari/537.36 SE 2.X MetaSr 1.0", "Range": f"bytes={start_loc}-"} | {"Sec-Fetch-Dest": "video", "Sec-Fetch-Mode": "no-cors", "Set-Fetch-Site": "same-origin"}
     # with s.get(url, headers=header, stream=True, proxies={'http': '127.0.0.1:7890', 'https': '127.0.0.1:7890'}) as response:
-    with s.get(url, headers=header, stream=True) as response:
-        try:
+    proxies = {"http": "http://127.0.0.1:7890"}
+    try:
+        with s.get(url, headers=header, stream=True) as response:
             response.raise_for_status()
-        except:
-            pass
-        total_length = response.headers.get("content-length")
-        if total_length is None:  # no content length header
-            return response.content
+            total_length = response.headers.get("content-length")
+            if total_length is None:  # no content length header
+                return response.content
 
-        speed_dict["total_length"] = int(response.headers["Content-Range"].split("/")[1])
-        speed_dict["current_length"] = start_loc
-        # method_iter_conent(file_loc, response, speed_dict) # 使用iter_content, 无法解决在某时刻没有速度的情况, 且最大速度为1M/s
-        method_shutil(file_loc, response, speed_dict)  # 使用 shutil.copyfileobj, 最快能达8M/s
+            speed_dict["total_length"] = int(response.headers["Content-Range"].split("/")[1])
+            speed_dict["current_length"] = start_loc
+            # method_iter_conent(file_loc, response, speed_dict) # 使用iter_content, 无法解决在某时刻没有速度的情况, 且最大速度为1M/s
+            method_shutil(file_loc, response, speed_dict)  # 使用 shutil.copyfileobj, 最快能达8M/s
+    except Exception as e:
+        print(response.headers)
+        print("Content-Length", response.headers.get("Content-Length"))
+        raise e
 
 
 def method_shutil(file_loc: Path, response: requests.Response, speed_dict):
+    speed_index = 0
     with open(file_loc, "ab") as f:  # https://stackoverflow.com/a/29967714/5340217
         length = 16 * 1024 * 1024
         with memoryview(bytearray(length)) as mv:
@@ -126,12 +128,12 @@ def method_shutil(file_loc: Path, response: requests.Response, speed_dict):
                     with mv[:n] as smv:
                         f.write(smv)
 
-                        update_speed(speed_dict, n)
+                        speed_index = update_speed(speed_dict, n, speed_index)
                     break
                 else:
                     f.write(mv)
 
-                    update_speed(speed_dict, n)
+                    speed_index = update_speed(speed_dict, n, speed_index)
 
 
 def method_iter_conent(file_loc, response, speed_dict):
@@ -142,15 +144,15 @@ def method_iter_conent(file_loc, response, speed_dict):
             update_speed(speed_dict, len(data))
 
 
-def update_speed(speed_dict, n):
+def update_speed(speed_dict, n, speed_index):
     speed_size = speed_dict["size"]
-    speed_size[speed_dict["index"] % 10] = n
+    speed_size[speed_index] = n
     speed_time = speed_dict["time"]
-    speed_time[speed_dict["index"] % 10] = time.time()
+    speed_time[speed_index] = time.time()
     speed_dict["size"] = speed_size  # https://stackoverflow.com/a/37510417/5340217
     speed_dict["time"] = speed_time
-    speed_dict["index"] += 1
     speed_dict["current_length"] += n
+    return (speed_index + 1) % 10
 
 
 def sizeof_fmt(num, suffix="B"):  # https://stackoverflow.com/a/1094933/5340217
@@ -161,20 +163,38 @@ def sizeof_fmt(num, suffix="B"):  # https://stackoverflow.com/a/1094933/5340217
     return f"{num:.2f}Y{suffix}"
 
 
-def get_filename(o: parse.SplitResult):
+def get_filename(o: parse.SplitResult, folder_loc: str):
+    # return "stream.mkv"
     path_list = o.path.split("/")
-    url = parse.urlunsplit([o.scheme, o.netloc, "/".join(path_list[:2] + ["Users", get_userID(o), "Items"] + [path_list[-2]]), f'X-Emby-Token={parse.parse_qs(o.query)["api_key"][0]}', ""])
-    header = {"Connection": "keep-alive", "accept": "application/json", "Sec-Fetch-Dest": "empty", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.87 Safari/537.36 SE 2.X MetaSr 1.0", "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Referer": f"{o.scheme}://{o.netloc}/web/index.html", "Accept-Language": "zh-CN,zh;q=0.9"}
-    response_json = s.get(url, headers=header).json()
+    try:
+        url = parse.urlunsplit([o.scheme, o.netloc, "/".join(path_list[:2] + ["Users", get_userID(o), "Items"] + [path_list[-2]]), f'X-Emby-Token={parse.parse_qs(o.query)["api_key"][0]}', ""])
+        header = {"Connection": "keep-alive", "accept": "application/json", "Sec-Fetch-Dest": "empty", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.87 Safari/537.36 SE 2.X MetaSr 1.0", "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Referer": f"{o.scheme}://{o.netloc}/web/index.html", "Accept-Language": "zh-CN,zh;q=0.9"}
+        # response_json = s.get(url, headers=header).json()
+        with s.get(url, headers=header) as response:
+            response_json = response.json()
+    except:
+        print(f'获取文件名失败: {response.text if "response" in locals() else ""}, {url}')
+        filename = input("文件名:")
+        return filename
 
     if "SeriesName" in response_json:
         # season = re.findall(r'\d+', response_json['SeasonName'])[0]
         # episode = re.findall(r'\d+', response_json['SortName'])[0]
         season = response_json["ParentIndexNumber"]
         episode = response_json["IndexNumber"]
-        filename = f"{response_json['SeriesName']}.S{season:02}E{episode:02}.{response_json['Container']}"
+        filename = f"{response_json['SeriesName']}.S{season:02}E{episode:02}"
     else:
-        filename = f"{response_json['Name']}.{response_json['Container']}"
+        filename = response_json["Name"]
+    if "Container" in response_json:
+        filename += "." + response_json["Container"]
+    else:
+        tmp = response_json["MediaSources"]
+        for i in tmp:
+            if i["Id"] == parse.parse_qs(o.query)["MediaSourceId"][0]:
+                filename += "." + i["Container"]
+                break
+        else:
+            filename += ".mkv"
 
     # 顺便下载字幕
     showID = path_list[3]
@@ -200,13 +220,13 @@ def get_filename(o: parse.SplitResult):
                 f.write(s.get(url, headers=header).content)
             break
 
-    return filename
+    return filename.replace(":", "_")
 
 
-def get_userID(o):
+def get_userID(o: parse.SplitResult):
     # 在*.emby/Users/*这里查看
     # emby/Users/authenticatebyname response['User']['Id']
-    config.read("config.ini")
+
     key = re.sub(r":.*$", "", o.netloc)
     if config.has_option("account", key):
         return config["account"][key]
@@ -228,6 +248,7 @@ def get_userID(o):
 
 def progress_bar(speed_dict):
     slow_flag = 0
+    message = "" * 50
     while True:
         if speed_dict["total_length"] < 0 or speed_dict["current_length"] < 0:
             time.sleep(1)
@@ -243,7 +264,9 @@ def progress_bar(speed_dict):
                 break
             done = int(50 * speed_dict["current_length"] / speed_dict["total_length"])  # https://stackoverflow.com/a/21868231/5340217
             est = int((speed_dict["total_length"] - speed_dict["current_length"]) / speed) if speed else -1
-            print(f'\r[{"=" * done}{" " * (50-done)}] {sizeof_fmt(speed)}/s {sizeof_fmt(speed_dict["current_length"])}/{sizeof_fmt(speed_dict["total_length"])} 预计: {str(datetime.timedelta(seconds=est))}', end="")
+            print(f'\r{" " * (len(message)+1)}', end="")
+            message = f'[{"=" * done}{" " * (50-done)}] {sizeof_fmt(speed)}/s {sizeof_fmt(speed_dict["current_length"])}/{sizeof_fmt(speed_dict["total_length"])} 剩余: {str(datetime.timedelta(seconds=est)) if est>=0 else "未知"}'
+            print(f"\r{message}", end="")
             time.sleep(1)
 
 
@@ -251,8 +274,7 @@ def progress_bar_2(speed_dict):
     from alive_progress import alive_bar
 
     slow_flag = 0
-    with alive_bar(speed_dict["total_length"], force_tty=True, monitor="{count}/{total}", stats="{rate}/s 预计: {eta}", elapsed=False, elapsed_end="耗时: {elapsed}", stats_end="平均速度: {rate}/s") as bar:
-        bar(speed_dict["current_length"])
+    with alive_bar(total=speed_dict["total_length"], manual=True, monitor="{count}/{total} [{percent:.0%}]") as bar:
         while True:
             if speed_dict["total_length"] < 0 or speed_dict["current_length"] < 0:
                 bar(0)
@@ -275,18 +297,21 @@ def progress_bar_2(speed_dict):
 
 
 def monitor():
+    config.read("config.ini")
     while True:
         with open("emby_links.txt", "r") as f:
             urls = [url for url in f.readlines() if len(url.strip()) > 0]
         if len(urls):
             url = urls[0]
             main(url.strip())  # 包含了\n
-            urls = open("emby_links.txt", "r").readlines()  # 有可能在下载过程中更新了文件
+            with open("emby_links.txt", "r") as f:
+                urls = f.readlines()  # 有可能在下载过程中更新了文件
             if urls[0] == url:
                 urls = [i for i in urls if i != url]
-                open("emby_links.txt", "w").writelines(urls)
+                with open("emby_links.txt", "w") as f:
+                    f.writelines(urls)
             else:
-                print("url changed")
+                print("url changed, old: ", url, "new: ", urls[0])
                 break
 
         time.sleep(1)
@@ -298,25 +323,10 @@ def add_list(url: str):
         f.write(url.strip() + "\n")
 
 
-def modify_alive_bar():
-    import inspect
-
-    import alive_progress.core.progress
-
-    source = inspect.getsource(alive_progress.core.progress)
-    new_source = source.replace("count=run.count", "count=sizeof_fmt(run.count)").replace("total=total", "total=sizeof_fmt(total)").replace("rate=run.rate, rate_spec=rate_spec,", "rate=sizeof_fmt(run.rate), rate_spec=rate_spec,").replace("(rate=run.rate, rate_spec=rate_spec)", "(rate=sizeof_fmt(run.rate), rate_spec=rate_spec)")
-
-    sizeof_fmt_source = inspect.getsource(sizeof_fmt)
-    new_source = new_source + "\n" + sizeof_fmt_source
-
-    exec(new_source, alive_progress.core.progress.__dict__)
-
-
 def check_server(para=None):
     if para:
         add_list(para)
     else:
-        modify_alive_bar()
         monitor()
 
 
