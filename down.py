@@ -300,14 +300,14 @@ def monitor():
     config.read("config.ini")
     while True:
         with open("emby_links.txt", "r") as f:
-            urls = [url for url in f.readlines() if len(url.strip()) > 0]
+            urls = [url.strip() for url in f.readlines() if url.strip()]
         if len(urls):
             url = urls[0]
-            main(url.strip())  # 包含了\n
+            main(url)  # 包含了\n
             with open("emby_links.txt", "r") as f:
-                urls = f.readlines()  # 有可能在下载过程中更新了文件
+                urls = [url.strip() for url in f.readlines() if url.strip()]  # 有可能在下载过程中更新了文件
             if urls[0] == url:
-                urls = [i for i in urls if i != url]
+                urls = [i + "\n" for i in urls if i != url]
                 with open("emby_links.txt", "w") as f:
                     f.writelines(urls)
             else:
