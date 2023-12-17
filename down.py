@@ -11,13 +11,6 @@ import requests
 
 s = requests.Session()
 config = ConfigParser()
-"""
-[account]
-emby.com = 123124591827312
-
-[settings]
-folder = D:\Movies\
-"""
 
 
 def main(url: str):
