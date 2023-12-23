@@ -257,7 +257,7 @@ def progress_bar(speed_dict):
                 break
             done = int(50 * speed_dict["current_length"] / speed_dict["total_length"])  # https://stackoverflow.com/a/21868231/5340217
             est = int((speed_dict["total_length"] - speed_dict["current_length"]) / speed) if speed else -1
-            print(f'\r{" " * (len(message)+1)}', end="")
+            print(f'\r{" " * (sum(2 if "\u4e00" <= char <= "\u9fff" else 1 for char in message))}', end="")
             message = f'[{"=" * done}{" " * (50-done)}] {sizeof_fmt(speed)}/s {sizeof_fmt(speed_dict["current_length"])}/{sizeof_fmt(speed_dict["total_length"])} 剩余: {str(datetime.timedelta(seconds=est)) if est>=0 else "未知"}'
             print(f"\r{message}", end="")
             time.sleep(1)
