@@ -8,6 +8,7 @@ from pathlib import Path
 
 import fire
 import requests
+import tqdm
 
 s = requests.Session()
 config = ConfigParser()
@@ -20,8 +21,7 @@ def main(url: str):
         print("no folder location in settings")
         exit()
 
-    o = parse.urlsplit(url)
-    file_loc = Path(folder_loc) / get_filename(o, folder_loc)
+    file_loc = get_filename(url, folder_loc)
     start_loc = file_loc.stat().st_size if file_loc.exists() else 0
     start = time.time()
     print(f"下载: {file_loc.name}")
@@ -82,7 +82,7 @@ def main(url: str):
     print(f'耗时: {(end - start):.2f}s, 平均速度: {sizeof_fmt((speed_dict["total_length"]-start_loc)/(end - start))}/s\n')
 
 
-def emby_download(url, file_loc, speed_dict):
+def emby_download(url: str, file_loc: Path, speed_dict):
     o = parse.urlsplit(url)
     if file_loc.exists():
         start_loc = file_loc.stat().st_size
@@ -156,8 +156,9 @@ def sizeof_fmt(num, suffix="B"):  # https://stackoverflow.com/a/1094933/5340217
     return f"{num:.2f}Y{suffix}"
 
 
-def get_filename(o: parse.SplitResult, folder_loc: str):
-    # return "stream.mkv"
+def get_filename(url: str, folder_loc: str):
+    # return folder_loc/"stream.mkv"
+    o = parse.urlsplit(url)
     path_list = o.path.split("/")
     try:
         url = parse.urlunsplit([o.scheme, o.netloc, "/".join(path_list[:2] + ["Users", get_userID(o), "Items"] + [path_list[-2]]), f'X-Emby-Token={parse.parse_qs(o.query)["api_key"][0]}', ""])
@@ -168,7 +169,7 @@ def get_filename(o: parse.SplitResult, folder_loc: str):
     except:
         print(f'获取文件名失败: {response.text if "response" in locals() else ""}, {url}')
         filename = input("文件名:")
-        return filename
+        return Path(folder_loc) / filename
 
     if "SeriesName" in response_json:
         # season = re.findall(r'\d+', response_json['SeasonName'])[0]
@@ -177,7 +178,7 @@ def get_filename(o: parse.SplitResult, folder_loc: str):
         episode = response_json["IndexNumber"]
         filename = f"{response_json['SeriesName']}.S{season:02}E{episode:02}"
     else:
-        filename = response_json["Name"]
+        filename: str = response_json["Name"]
     if "Container" in response_json:
         filename += "." + response_json["Container"]
     else:
@@ -213,7 +214,7 @@ def get_filename(o: parse.SplitResult, folder_loc: str):
                 f.write(s.get(url, headers=header).content)
             break
 
-    return filename.replace(":", "_")
+    return Path(folder_loc) / filename.replace(":", "_")
 
 
 def get_userID(o: parse.SplitResult):
