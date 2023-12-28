@@ -14,14 +14,15 @@ s = requests.Session()
 config = ConfigParser()
 
 
-def main(url: str):
+def main(record: str):
     if config.has_option("settings", "folder"):
         folder_loc = config["settings"]["folder"]
     else:
         print("no folder location in settings")
         exit()
 
-    file_loc = get_filename(url, folder_loc)
+    filename, url = record.split(" ", 1)
+    file_loc = Path(folder_loc) / filename
     start_loc = file_loc.stat().st_size if file_loc.exists() else 0
     start = time.time()
     print(f"下载: {file_loc.name}")
@@ -104,7 +105,6 @@ def emby_download(url: str, file_loc: Path, speed_dict):
             method_shutil(file_loc, response, speed_dict)  # 使用 shutil.copyfileobj, 最快能达8M/s
     except Exception as e:
         print(response.headers)
-        print("Content-Length", response.headers.get("Content-Length"))
         raise e
 
 
@@ -169,7 +169,7 @@ def get_filename(url: str, folder_loc: str):
     except:
         print(f'获取文件名失败: {response.text if "response" in locals() else ""}, {url}')
         filename = input("文件名:")
-        return Path(folder_loc) / filename
+        return filename
 
     if "SeriesName" in response_json:
         # season = re.findall(r'\d+', response_json['SeasonName'])[0]
@@ -214,7 +214,7 @@ def get_filename(url: str, folder_loc: str):
                 f.write(s.get(url, headers=header).content)
             break
 
-    return Path(folder_loc) / filename.replace(":", "_")
+    return filename.replace(":", "_").replace(" ", ".")
 
 
 def get_userID(o: parse.SplitResult):
@@ -235,7 +235,7 @@ def get_userID(o: parse.SplitResult):
         print(ID)
         print(f'api_key={response["AccessToken"]}')
         config["account"][key] = ID
-        with open("config.ini", "w") as configfile:
+        with open(Path(__file__).parent / "config.ini", "w", encoding="utf-8") as configfile:
             config.write(configfile)
         exit()
 
@@ -291,30 +291,38 @@ def progress_bar_2(speed_dict):
 
 
 def monitor():
-    config.read("config.ini")
     while True:
-        with open("emby_links.txt", "r") as f:
-            urls = [url.strip() for url in f.readlines() if url.strip()]
-        if len(urls):
-            url = urls[0]
-            main(url)  # 包含了\n
-            with open("emby_links.txt", "r") as f:
-                urls = [url.strip() for url in f.readlines() if url.strip()]  # 有可能在下载过程中更新了文件
-            if urls[0] == url:
-                urls = [i + "\n" for i in urls if i != url]
-                with open("emby_links.txt", "w") as f:
-                    f.writelines(urls)
+        with open(Path(__file__).parent / "emby_links.txt", "r", encoding="utf-8") as f:
+            records = [record.strip() for record in f.readlines() if record.strip()]
+        if len(records):
+            record = records[0]
+            main(record)  # 格式为 Vigil.S02E03.mkv url
+            with open(Path(__file__).parent / "emby_links.txt", "r", encoding="utf-8") as f:
+                records = [url.strip() for url in f.readlines() if url.strip()]  # 有可能在下载过程中更新了文件
+            if records[0] == record:
+                records = [i + "\n" for i in records if i != record]
+                with open(Path(__file__).parent / "emby_links.txt", "w", encoding="utf-8") as f:
+                    f.writelines(records)
             else:
-                print("url changed, old: ", url, "new: ", urls[0])
+                print("url changed, old: ", record, "new: ", records[0])
                 break
 
         time.sleep(1)
 
 
 def add_list(url: str):
-    print(url.strip())
-    with open(Path(__file__).parent / "emby_links.txt", "a") as f:
-        f.write(url.strip() + "\n")
+    if config.has_option("settings", "folder"):
+        folder_loc = config["settings"]["folder"]
+    else:
+        print("no folder location in settings")
+        exit()
+
+    url = url.strip()
+    filename = get_filename(url, folder_loc)  # 顺便下载字幕
+
+    print(filename, url)
+    with open(Path(__file__).parent / "emby_links.txt", "a", encoding="utf-8") as f:
+        f.write(f"{filename} {url}\n")
 
 
 def check_server(para=None):
@@ -325,5 +333,5 @@ def check_server(para=None):
 
 
 if __name__ == "__main__":
-    # pass
+    config.read(Path(__file__).parent / "config.ini", encoding="utf-8")
     fire.Fire(check_server)
