@@ -21,7 +21,7 @@ def main(record: str):
         print("no folder location in settings")
         exit()
 
-    filename, url = record.split(" ", 1)
+    filename, url = record.rsplit(" ", 1)
     file_loc = Path(folder_loc) / filename
     start_loc = file_loc.stat().st_size if file_loc.exists() else 0
     start = time.time()
@@ -214,7 +214,7 @@ def get_filename(url: str, folder_loc: str):
                 f.write(s.get(url, headers=header).content)
             break
 
-    return filename.replace(":", "_").replace(" ", ".")
+    return filename.replace(":", "_")
 
 
 def get_userID(o: parse.SplitResult):
