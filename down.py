@@ -49,7 +49,7 @@ def main(record: str):
                         unit_scale=True,
                         unit_divisor=1024,
                         unit="B",
-                        bar_format = "|{bar:50}| {rate_fmt} {n_fmt}/{total_fmt} 剩余: {remaining}",
+                        bar_format="|{bar:50}| {rate_fmt} {n_fmt}/{total_fmt} 剩余: {remaining}",
                     )
                 else:
                     n = pipe_recv.recv()
@@ -63,27 +63,25 @@ def main(record: str):
             else:
                 slow_flag = 0
             if slow_flag >= 30:
-                pbar.close()
-                print("\n速度太慢, 5秒后重新连接")
+                pbar.display(mask_str("速度太慢, 5秒后重新连接", pos=int(pbar.n / pbar.total * 50)))
                 p_download_file.terminate()
                 p_download_file.join()
                 time.sleep(5)
                 break
             elif not p_download_file.is_alive():
                 if current_length == total_length and total_length > 0:  # 下载完成
-                    pbar.close()
                     restart = False
                     break
                 else:  # 下载报错, p_download_file停止
-                    pbar.close()
-                    print("\n下载失败, 5秒后重新连接")
+                    pbar.display(mask_str("下载失败, 5秒后重新连接", pos=int(pbar.n / pbar.total * 50)))
                     time.sleep(5)
                     break
             time.sleep(1)
+        pbar.close()
         pbar = None
 
     end = time.time()
-    print(f"耗时: {(end - start):.2f}s, 平均速度: {tqdm.format_sizeof((total_length-start_loc)/(end - start), suffix="B", divisor=1024)}/s\n")
+    print(f"耗时: {(end - start):.2f}s, 平均速度: {tqdm.format_sizeof((total_length-start_loc)/(end - start), suffix='B', divisor=1024)}/s\n")
 
 
 def emby_download(url: str, file_loc: Path, pipe_send: Connection):
@@ -211,6 +209,18 @@ def get_userID(o: parse.SplitResult):
         with open(Path(__file__).parent / "config.ini", "w", encoding="utf-8") as configfile:
             config.write(configfile)
         exit()
+
+
+def mask_str(msg: str, pos: int):
+    if pos == 0:
+        return "|" + msg + "\n"
+    else:
+        cur_pos = 0
+        for i, c in enumerate(msg):
+            cur += len(c.encode("utf-16le")) // 2
+            if cur_pos >= pos:
+                break
+        return "|\033[30;47m" + msg[: i + 1] + "\033[0m" + msg[i + 1 :] + "\n"
 
 
 def monitor():
