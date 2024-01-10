@@ -45,16 +45,19 @@ def main(record: str):
                     pbar = tqdm(
                         total=total_length,
                         initial=current_length,
-                        mininterval=1,
                         unit_scale=True,
                         unit_divisor=1024,
                         unit="B",
                         bar_format="|{bar:50}| {rate_fmt} {n_fmt}/{total_fmt} 剩余: {remaining}",
+                        leave=False,
+                        miniters=0,
                     )
                 else:
                     n = pipe_recv.recv()
                     pbar.update(n)
                     current_length += n
+            elif pbar is not None:
+                pbar.update(0)
             if pbar is None or (rate := pbar.format_dict["rate"]) is None:
                 rate = 0
             max_speed = max(max_speed, rate)
@@ -63,25 +66,45 @@ def main(record: str):
             else:
                 slow_flag = 0
             if slow_flag >= 30:
-                pbar.display(mask_str("速度太慢, 5秒后重新连接", pos=int(pbar.n / pbar.total * 50)))
+                if pbar is None:
+                    print("速度太慢, 5秒后重新连接")
+                else:
+                    pbar.display(mask_str("速度太慢, 5秒后重新连接", pos=int(pbar.n / pbar.total * 50)))
                 p_download_file.terminate()
                 p_download_file.join()
                 time.sleep(5)
                 break
             elif not p_download_file.is_alive():
                 if current_length == total_length and total_length > 0:  # 下载完成
+                    end = time.time()
+                    elapsed_time = end - start
+                    time_str = ""
+
+                    for unit_divisor, unit in [(60, "s"), (60, "m"), (24, "h"), (100000, "d")]:
+                        if elapsed_time == 0:
+                            break
+                        temp, remainder = divmod(elapsed_time, unit_divisor)
+                        if unit == "s":
+                            remainder = round(remainder, 2)
+                            temp = int(temp)
+                        elapsed_time = temp
+                        time_str = f"{remainder}{unit}{time_str}"
+
+                    pbar.display(mask_str(f"耗时: {time_str}, 平均速度: {tqdm.format_sizeof((total_length-start_loc)/(end - start), suffix='B', divisor=1024)}/s", pos=50))
                     restart = False
                     break
                 else:  # 下载报错, p_download_file停止
-                    pbar.display(mask_str("下载失败, 5秒后重新连接", pos=int(pbar.n / pbar.total * 50)))
+                    if pbar is None:
+                        print("下载失败, 5秒后重新连接")
+                    else:
+                        pbar.display(mask_str("下载失败, 5秒后重新连接", pos=int(pbar.n / pbar.total * 50)))
                     time.sleep(5)
                     break
             time.sleep(1)
-        pbar.close()
+        if pbar is not None:
+            pbar.close()
         pbar = None
-
-    end = time.time()
-    print(f"耗时: {(end - start):.2f}s, 平均速度: {tqdm.format_sizeof((total_length-start_loc)/(end - start), suffix='B', divisor=1024)}/s\n")
+    pipe_recv.close()
 
 
 def emby_download(url: str, file_loc: Path, pipe_send: Connection):
@@ -217,7 +240,7 @@ def mask_str(msg: str, pos: int):
     else:
         cur_pos = 0
         for i, c in enumerate(msg):
-            cur += len(c.encode("utf-16le")) // 2
+            cur_pos += 2 if 0x2E80 <= ord(c) <= 0x9FFF else 1
             if cur_pos >= pos:
                 break
         return "|\033[30;47m" + msg[: i + 1] + "\033[0m" + msg[i + 1 :] + "\n"
