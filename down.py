@@ -1,11 +1,10 @@
-import datetime
 import multiprocessing as mp
 import re
 import time
-import urllib.parse as parse
 from configparser import ConfigParser
 from multiprocessing.connection import Connection
 from pathlib import Path
+from urllib import parse
 
 import fire
 import requests
@@ -39,8 +38,9 @@ def main(record: str):
         p_download_file = mp.Process(target=emby_download, args=(url, file_loc, pipe_send), daemon=True)
         p_download_file.start()
         while True:
-            if pipe_recv.poll():
-                if pbar is None:
+            rate = 0
+            if pbar is None:
+                if pipe_recv.poll():
                     total_length, current_length = pipe_recv.recv()
                     pbar = tqdm(
                         total=total_length,
@@ -49,17 +49,22 @@ def main(record: str):
                         unit_divisor=1024,
                         unit="B",
                         bar_format="|{bar:50}| {rate_fmt} {n_fmt}/{total_fmt} 剩余: {remaining}",
-                        leave=False,
+                        leave=False,  # keep the display()
                         miniters=0,
                     )
-                else:
-                    n = pipe_recv.recv()
+            else:
+                n = 0
+                while pipe_recv.poll():
+                    n += pipe_recv.recv()
+                if n > 0:
+                    last_dt = pbar._ema_dt.last
+                    last_print_t = pbar.last_print_t
                     pbar.update(n)
                     current_length += n
-            elif pbar is not None:
-                pbar.update(0)
-            if pbar is None or (rate := pbar.format_dict["rate"]) is None:
-                rate = 0
+                    rate = pbar.format_dict["rate"]
+                elif pbar._ema_dt.calls > 0:
+                    rate = pbar._ema_dn() / (pbar.smoothing * (time.time() - last_print_t) + (1 - pbar.smoothing) * last_dt) * (1 - (1 - pbar.smoothing) ** pbar._ema_dt.calls)
+                    pbar.display(msg=tqdm.format_meter(**pbar.format_dict | {"rate": rate}))
             max_speed = max(max_speed, rate)
             if rate <= max_speed / 2 and rate < 1024 * 1024:
                 slow_flag += 1
@@ -69,41 +74,33 @@ def main(record: str):
                 if pbar is None:
                     print("速度太慢, 5秒后重新连接")
                 else:
-                    pbar.display(mask_str("速度太慢, 5秒后重新连接", pos=int(pbar.n / pbar.total * 50)))
+                    pbar.display(mask_str("🛑速度太慢, 5秒后重新连接", pos=int(pbar.n / pbar.total * 50)))
+                    pbar.close()
                 p_download_file.terminate()
                 p_download_file.join()
                 time.sleep(5)
                 break
             elif not p_download_file.is_alive():
                 if current_length == total_length and total_length > 0:  # 下载完成
-                    end = time.time()
-                    elapsed_time = end - start
-                    time_str = ""
-
-                    for unit_divisor, unit in [(60, "s"), (60, "m"), (24, "h"), (100000, "d")]:
-                        if elapsed_time == 0:
-                            break
-                        temp, remainder = divmod(elapsed_time, unit_divisor)
-                        if unit == "s":
-                            remainder = round(remainder, 2)
-                            temp = int(temp)
-                        elapsed_time = temp
-                        time_str = f"{remainder}{unit}{time_str}"
-
-                    pbar.display(mask_str(f"耗时: {time_str}, 平均速度: {tqdm.format_sizeof((total_length-start_loc)/(end - start), suffix='B', divisor=1024)}/s", pos=50))
+                    pbar.display(msg=tqdm.format_meter(**pbar.format_dict | {"elapsed": time.time() - start, "bar_format": "|{bar:50}| {rate_fmt} {total_fmt} 耗时: {elapsed}", "initial": start_loc}))
+                    pbar.display(mask_str("下载完成", pos=50))
+                    pbar.close()
                     restart = False
                     break
                 else:  # 下载报错, p_download_file停止
-                    if pbar is None:
+                    if p_download_file.exitcode == 0:
+                        print("\n进程正常结束?\n")
+                    elif pbar is None:
                         print("下载失败, 5秒后重新连接")
                     else:
-                        pbar.display(mask_str("下载失败, 5秒后重新连接", pos=int(pbar.n / pbar.total * 50)))
+                        pbar.display(mask_str("🛑下载失败, 5秒后重新连接", pos=int(pbar.n / pbar.total * 50)))
+                        pbar.close()
                     time.sleep(5)
                     break
-            time.sleep(1)
-        if pbar is not None:
-            pbar.close()
-        pbar = None
+            else:
+                time.sleep(1)
+        while pipe_recv.poll():  # clear the pipe
+            pipe_recv.recv()
     pipe_recv.close()
 
 
