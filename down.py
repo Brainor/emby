@@ -74,7 +74,7 @@ def main(record: str):
                 if pbar is None:
                     print("速度太慢, 5秒后重新连接")
                 else:
-                    pbar.display(mask_str("🛑速度太慢, 5秒后重新连接", pos=int(pbar.n / pbar.total * 50)))
+                    pbar.display(mask_str("🛑 速度太慢, 5秒后重新连接", pos=int(pbar.n / pbar.total * 50)))
                     pbar.close()
                 p_download_file.terminate()
                 p_download_file.join()
@@ -82,18 +82,18 @@ def main(record: str):
                 break
             elif not p_download_file.is_alive():
                 if current_length == total_length and total_length > 0:  # 下载完成
-                    pbar.display(msg=tqdm.format_meter(**pbar.format_dict | {"elapsed": time.time() - start, "bar_format": "|{bar:50}| {rate_fmt} {total_fmt} 耗时: {elapsed}", "initial": start_loc}))
-                    pbar.display(mask_str("下载完成", pos=50))
+                    pbar.display(msg=tqdm.format_meter(**pbar.format_dict | {"elapsed": time.time() - start, "bar_format": "|{bar:50}|🎉 {rate_fmt} {total_fmt} 耗时: {elapsed}", "initial": start_loc}))
+                    print("")
                     pbar.close()
                     restart = False
                     break
                 else:  # 下载报错, p_download_file停止
                     if p_download_file.exitcode == 0:
-                        print("\n进程正常结束?\n")
+                        print("\n进程正常结束?")
                     elif pbar is None:
                         print("下载失败, 5秒后重新连接")
                     else:
-                        pbar.display(mask_str("🛑下载失败, 5秒后重新连接", pos=int(pbar.n / pbar.total * 50)))
+                        pbar.display(mask_str("🛑 下载失败, 5秒后重新连接", pos=int(pbar.n / pbar.total * 50)))
                         pbar.close()
                     time.sleep(5)
                     break
@@ -111,10 +111,10 @@ def emby_download(url: str, file_loc: Path, pipe_send: Connection):
     else:
         start_loc = 0
     header = {"Accept": "*/*", "Accept-Encoding": "identity;q=1, *;q=0", "Accept-Language": "zh-CN,zh;q=0.9", "Host": o.netloc, "Connection": "keep-alive", "Referer": f"{o.scheme}://{o.netloc}/web/index.html", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.87 Safari/537.36 SE 2.X MetaSr 1.0", "Range": f"bytes={start_loc}-"} | {"Sec-Fetch-Dest": "video", "Sec-Fetch-Mode": "no-cors", "Set-Fetch-Site": "same-origin"}
-    # with s.get(url, headers=header, stream=True, proxies={'http': '127.0.0.1:7890', 'https': '127.0.0.1:7890'}) as response:
-    proxies = {"http": "http://127.0.0.1:7890"}
+    proxies = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
+    proxies = None
     try:
-        with s.get(url, headers=header, stream=True) as response:
+        with s.get(url, headers=header, stream=True, proxies=proxies) as response:
             response.raise_for_status()
             total_length_raw = response.headers.get("content-length")
             if total_length_raw is None:  # no content length header
