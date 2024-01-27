@@ -15,3 +15,5 @@ With complete awareness of possible infringement, please proceed with caution an
     [settings]
     folder = D:\Movies\
     ```
+
+# EMBY api

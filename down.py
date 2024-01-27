@@ -74,7 +74,7 @@ def main(record: str):
                 if pbar is None:
                     print("速度太慢, 5秒后重新连接")
                 else:
-                    pbar.display(mask_str("🛑 速度太慢, 5秒后重新连接", pos=int(pbar.n / pbar.total * 50)))
+                    pbar.display(mask_str("🛑 速度太慢, 5秒后重新连接", pos=round(pbar.n / pbar.total * 50)))
                     pbar.close()
                 p_download_file.terminate()
                 p_download_file.join()
@@ -93,7 +93,7 @@ def main(record: str):
                     elif pbar is None:
                         print("下载失败, 5秒后重新连接")
                     else:
-                        pbar.display(mask_str("🛑 下载失败, 5秒后重新连接", pos=int(pbar.n / pbar.total * 50)))
+                        pbar.display(mask_str("🛑 下载失败, 5秒后重新连接", pos=round(pbar.n / pbar.total * 50)))
                         pbar.close()
                     time.sleep(5)
                     break
@@ -138,6 +138,7 @@ def method_shutil(file_loc: Path, response: requests.Response, pipe_send: Connec
                     print("\nnot n\n")
                     break
                 elif n < length:
+                    print(f"\n{n=}\n")
                     pipe_send.send(n)
                     with mv[:n] as smv:
                         f.write(smv)
@@ -240,7 +241,7 @@ def mask_str(msg: str, pos: int):
             cur_pos += 2 if 0x2E80 <= ord(c) <= 0x9FFF else 1
             if cur_pos >= pos:
                 break
-        return "|\033[30;47m" + msg[: i + 1] + "\033[0m" + msg[i + 1 :] + "\n"
+        return "|\x1B[7m" + msg[: i + 1] + "\x1B[0m" + msg[i + 1 :] + "\n"
 
 
 def monitor():
