@@ -135,14 +135,11 @@ def method_shutil(file_loc: Path, response: requests.Response, pipe_send: Connec
             while True:
                 n = response.raw.readinto(mv)
                 if not n:
-                    print("\nnot n\n")
                     break
                 elif n < length:
-                    print(f"\n{n=}\n")
                     pipe_send.send(n)
                     with mv[:n] as smv:
                         f.write(smv)
-                    break
                 else:
                     pipe_send.send(n)
                     f.write(mv)
