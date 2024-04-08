@@ -28,6 +28,7 @@ def main(record: str):
     print(f"下载: {file_loc.name}")
     restart = True  # 是否进入循环
     pipe_recv, pipe_send = mp.Pipe(duplex=False)
+    proxy_flag = 0
     while restart:
         pbar = None
         max_speed = 0  # 0表示无法正常连接
@@ -35,7 +36,7 @@ def main(record: str):
         current_length = -2
         slow_flag = 0
 
-        p_download_file = mp.Process(target=emby_download, args=(url, file_loc, pipe_send), daemon=True)
+        p_download_file = mp.Process(target=emby_download, args=(url, file_loc, proxy_flag == 4, pipe_send), daemon=True)
         p_download_file.start()
         while True:
             rate = 0
@@ -66,7 +67,7 @@ def main(record: str):
                     rate = pbar._ema_dn() / (pbar.smoothing * (time.time() - last_print_t) + (1 - pbar.smoothing) * last_dt) * (1 - (1 - pbar.smoothing) ** pbar._ema_dt.calls)
                     pbar.display(msg=tqdm.format_meter(**pbar.format_dict | {"rate": rate}))
             max_speed = max(max_speed, rate)
-            if rate <= max_speed / 2 and rate < 1024 * 1024:
+            if (max_speed > 1024 * 1024 and rate <= max_speed / 2 and rate < 1024 * 1024) or rate <= 10:
                 slow_flag += 1
             else:
                 slow_flag = 0
@@ -78,6 +79,7 @@ def main(record: str):
                     pbar.close()
                 p_download_file.terminate()
                 p_download_file.join()
+                proxy_flag = (proxy_flag + 1) % 5
                 time.sleep(5)
                 break
             elif not p_download_file.is_alive():
@@ -95,6 +97,7 @@ def main(record: str):
                     else:
                         pbar.display(mask_str("🛑 下载失败, 5秒后重新连接", pos=round(pbar.n / pbar.total * 50)))
                         pbar.close()
+                    proxy_flag = (proxy_flag + 1) % 5
                     time.sleep(5)
                     break
             else:
@@ -104,15 +107,14 @@ def main(record: str):
     pipe_recv.close()
 
 
-def emby_download(url: str, file_loc: Path, pipe_send: Connection):
+def emby_download(url: str, file_loc: Path, proxy_flag: bool, pipe_send: Connection):
     o = parse.urlsplit(url)
     if file_loc.exists():
         start_loc = file_loc.stat().st_size
     else:
         start_loc = 0
     header = {"Accept": "*/*", "Accept-Encoding": "identity;q=1, *;q=0", "Accept-Language": "zh-CN,zh;q=0.9", "Host": o.netloc, "Connection": "keep-alive", "Referer": f"{o.scheme}://{o.netloc}/web/index.html", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.87 Safari/537.36 SE 2.X MetaSr 1.0", "Range": f"bytes={start_loc}-"} | {"Sec-Fetch-Dest": "video", "Sec-Fetch-Mode": "no-cors", "Set-Fetch-Site": "same-origin"}
-    proxies = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
-    proxies = None
+    proxies = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"} if proxy_flag else None
     try:
         with s.get(url, headers=header, stream=True, proxies=proxies) as response:
             response.raise_for_status()
@@ -242,23 +244,26 @@ def mask_str(msg: str, pos: int):
 
 
 def monitor():
-    while True:
-        with open(Path(__file__).parent / "emby_links.txt", "r", encoding="utf-8") as f:
-            records = [record.strip() for record in f.readlines() if record.strip()]
-        if len(records):
-            record = records[0]
-            main(record)  # 格式为 Vigil.S02E03.mkv url
+    try:
+        while True:
             with open(Path(__file__).parent / "emby_links.txt", "r", encoding="utf-8") as f:
-                records = [url.strip() for url in f.readlines() if url.strip()]  # 有可能在下载过程中更新了文件
-            if records[0] == record:
-                records = [i + "\n" for i in records if i != record]
-                with open(Path(__file__).parent / "emby_links.txt", "w", encoding="utf-8") as f:
-                    f.writelines(records)
-            else:
-                print("url changed, old: ", record, "new: ", records[0])
-                break
+                records = [record.strip() for record in f.readlines() if record.strip()]
+            if len(records):
+                record = records[0]
+                main(record)  # 格式为 Vigil.S02E03.mkv url
+                with open(Path(__file__).parent / "emby_links.txt", "r", encoding="utf-8") as f:
+                    records = [url.strip() for url in f.readlines() if url.strip()]  # 有可能在下载过程中更新了文件
+                if records[0] == record:
+                    records = [i + "\n" for i in records if i != record]
+                    with open(Path(__file__).parent / "emby_links.txt", "w", encoding="utf-8") as f:
+                        f.writelines(records)
+                else:
+                    print("url changed, old: ", record, "new: ", records[0])
+                    break
 
-        time.sleep(1)
+            time.sleep(1)
+    except KeyboardInterrupt:
+        return
 
 
 def add_list(url: str):
