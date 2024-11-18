@@ -125,6 +125,8 @@ def emby_download(url: str, file_loc: Path, proxy_flag: bool, pipe_send: Connect
             pipe_send.send((int(response.headers["Content-Range"].split("/")[1]), start_loc))
             # method_iter_conent(file_loc, response, current_length) # 使用iter_content, 无法解决在某时刻没有速度的情况, 且最大速度为1M/s
             method_shutil(file_loc, response, pipe_send)  # 使用 shutil.copyfileobj, 最快能达8M/s
+    except requests.exceptions.BaseHTTPError as e:
+        print(response.headers, "\nconnection broken: ", e)
     except Exception as e:
         print(response.headers)
         raise e
