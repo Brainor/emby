@@ -116,6 +116,7 @@ def emby_download(url: str, file_loc: Path, proxy_flag: bool, pipe_send: Connect
     header = {"Accept": "*/*", "Accept-Encoding": "identity;q=1, *;q=0", "Accept-Language": "zh-CN,zh;q=0.9", "Host": o.netloc, "Connection": "keep-alive", "Referer": f"{o.scheme}://{o.netloc}/web/index.html", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.87 Safari/537.36 SE 2.X MetaSr 1.0", "Range": f"bytes={start_loc}-"} | {"Sec-Fetch-Dest": "video", "Sec-Fetch-Mode": "no-cors", "Set-Fetch-Site": "same-origin"}
     proxies = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"} if proxy_flag else None
     try:
+        response = None
         with s.get(url, headers=header, stream=True, proxies=proxies) as response:
             response.raise_for_status()
             total_length_raw = response.headers.get("content-length")
@@ -128,7 +129,8 @@ def emby_download(url: str, file_loc: Path, proxy_flag: bool, pipe_send: Connect
     except requests.exceptions.BaseHTTPError as e:
         print(response.headers, "\nconnection broken: ", e)
     except Exception as e:
-        print(response.headers)
+        if response is not None:
+            print(response.headers)
         raise e
 
 
